@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  ghost:
+    build:
+      context: .
+    restart: always
+    ports:
+      - 3001:2368
+    environment:
+      - url=http://localhost:3001/

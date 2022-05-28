@@ -1,0 +1,3 @@
+{
+  "query": "DELETE FROM posts_tags; DELETE FROM posts_authors; DELETE FROM posts;"
+}

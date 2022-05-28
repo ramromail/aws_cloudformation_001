@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy a MySql RDS database. A snapshot of the RDS DBInstance is taken on stack deletion.
+Parameters:
+  DatabaseName:
+    Description: The name of the RDS database.
+    Type: String
+    Default: "rdsdb"
+  StackName:
+    Description: The name of the VPC.
+    Type: String
+    Default: "VPC-stack-name"
+  SecretName:
+    Description: The name of the secret where DB password is stored.
+    Type: String
+    Default: "RDSSecret"
+
+Resources:
+  RDSSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Description: "This is a Secrets Manager secret for an RDS DB instance"
+      Name: !Ref SecretName
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "root"}'
+        GenerateStringKey: "password"
+        PasswordLength: 20
+        ExcludeCharacters: '"@/\'
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: ghostblog-db-subnet-group
+      DBSubnetGroupDescription: ghostblog-db-subnet-group-desc
+      SubnetIds:
+        - Fn::ImportValue:
+            !Join [':', [!Ref 'StackName', 'PrivateSubnetOne' ] ]
+        - Fn::ImportValue:
+            !Join [':', [!Ref 'StackName', 'PrivateSubnetTwo' ] ]
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Security Group
+      VpcId:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'StackName', 'VPCId' ] ]
+      GroupName: ghostblog-RDS-SG
+      SecurityGroupIngress:
+      - IpProtocol: "tcp"
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: 10.0.0.0/16
+
+  MySQLDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DatabaseName
+      AllocatedStorage: 5
+      BackupRetentionPeriod: 0
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: 5.7
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      StorageEncrypted: true
+
+  #This is a SecretTargetAttachment resource which updates the referenced Secret resource with properties about
+  #the referenced RDS instance
+  SecretRDSInstanceAttachment:
+    Type: "AWS::SecretsManager::SecretTargetAttachment"
+    Properties:
+      SecretId: !Ref RDSSecret
+      TargetId: !Ref MySQLDB
+      TargetType: AWS::RDS::DBInstance
+
+Outputs:
+  RDSEndpointAddress:
+    Description: "RDS Endpoint Address"
+    Value: !GetAtt MySQLDB.Endpoint.Address
+    Export:
+      Name: !Join [ ':', [ !Ref 'StackName', 'MySQLDB' ] ]
+  DBSecurityGroup:
+    Description: "The DB security group."
+    Value: !Ref DBSecurityGroup
+    Export:
+      Name: !Join [ ':', [ !Ref 'StackName', 'DBSecurityGroup' ] ]
+  RDSSecret:
+    Description: "RDS secret string"
+    Value: !Ref RDSSecret
+    Export:
+      Name: !Join [ ':', [ !Ref 'StackName', !Ref 'SecretName' ] ]

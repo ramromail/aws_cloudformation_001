@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An AWS Lambda application that connects to a MySQL database in the VPC
+  to run SQL queries.
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+
+  DatabaseName:
+    Description: The name of the RDS database.
+    Type: String
+    Default: "rdsdb"
+  StackName:
+    Description: The name of the VPC.
+    Type: String
+    Default: "VPC-stack-name"
+  BucketName:
+    Description: The name of the S3 bucket to hold lambda artifacts.
+    Type: String
+    Default: "lambda-artifacts-001"
+  SecretName:
+    Description: The name of the secret where DB password is stored.
+    Type: String
+    Default: "RDSSecret"
+
+Resources:
+
+  Libs:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: rds-mysql-lib
+      Description: Dependencies for the rds-mysql sample app.
+      ContentUri: ../lib/.
+      CompatibleRuntimes:
+        - nodejs10.x
+        - nodejs12.x
+
+  function:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../dbadmin/.
+      Description: Run SQL queries.
+      MemorySize: 128
+      Timeout: 15
+      Runtime: nodejs12.x
+      Tracing: Active
+      Handler: index.handler
+      Environment:
+          Variables:
+            databaseHost:
+              Fn::ImportValue:
+                !Join [':', [!Ref 'StackName', 'MySQLDB' ] ]
+            databaseName: !Ref DatabaseName
+            databaseUser: !Sub '{{resolve:secretsmanager:${SecretName}:SecretString:username}}'
+            databasePassword: !Sub '{{resolve:secretsmanager:${SecretName}:SecretString:password}}'
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              !Join [':', [!Ref 'StackName', 'DBSecurityGroup' ] ]
+        SubnetIds:
+          - Fn::ImportValue:
+              !Join [':', [!Ref 'StackName', 'PrivateSubnetOne' ] ]
+          - Fn::ImportValue:
+              !Join [':', [!Ref 'StackName', 'PrivateSubnetTwo' ] ]
+      # Function's execution role
+      Role: !GetAtt role.Arn
+      Layers:
+        - !Ref Libs
+  role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: rds-iamauth
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'rds-db:connect'
+                Resource: '*'
+      Path: /service-role/
+
